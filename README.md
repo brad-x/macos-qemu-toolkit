@@ -1,5 +1,9 @@
-Examples
+QEMUCTL
 ===
+
+Purpose
+---
+A simple script wrapper to make creating, configuring and cloning QEMU VM's easier on macOS.
 
 Create a QEMU VM
 ---
