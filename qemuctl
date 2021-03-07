@@ -1,0 +1,330 @@
+#!/bin/bash
+
+INSTANCE_PATH="${HOME}/.qemu"
+CPU_COUNT=$(sysctl -n hw.ncpu)
+DISKS=()
+SHOW_CURSOR="on"
+DISPLAY="cocoa"
+GRAPHICS_CMD="-display ${DISPLAY:-cocoa}"
+BOOT_ARGS="-boot c"
+ACCEL_METHOD="hvf"
+SYSTEM_MEMORY="8G"
+GRAPHICS_DRIVER="std"
+ARCH="x86_64"
+BOOTDISK_SIZE="20G"
+
+case ${1} in
+    start)
+    shift
+    while [[ $# -gt 0 ]]
+    do
+    key="$1"
+        case $key in
+            -n|-name)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-name requires an argument!"
+                exit 1
+            fi
+
+            # Populate $INSTANCE_NAME var
+            INSTANCE_NAME="${2}"
+            # Create a working directory for the VM if it doesn't exist
+            if [ ! -d "${INSTANCE_PATH}"/"${INSTANCE_NAME}" ]; then
+                echo "Directory does not exist. Creating."
+                mkdir -pv "${INSTANCE_PATH}"/"${INSTANCE_NAME}"
+            fi
+            # If any config variables are present, source these. May be overridden by later command line options.
+            if [ -f "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf ]; then
+                source "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+            fi
+            # Create a default virtual disk if none is specified.
+            if [ ! -f "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img ]; then
+                echo "Image does not exist. Creating default 20GB image."
+                qemu-img create -f raw "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img "${BOOTDISK_SIZE}"
+                echo "${INSTANCE_NAME}".img > "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/disks.inc
+            fi
+            # Read a list of additional drives to attach to this VM. Currently needs manual creation for disks other than the first boot device if automatically
+            # created by the check above. We probably want a verb that lets us create disks and populate this file later on.
+            while read disk
+            do
+                CLEAN_INSTANCE_NAME="$(echo $INSTANCE_NAME)"
+                DISKS+="-drive file=${INSTANCE_PATH}/${CLEAN_INSTANCE_NAME}/${disk},format=raw,if=virtio,cache=writeback,discard=unmap"
+            done < "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/disks.inc
+            shift
+            shift
+            ;;
+            -cdrom)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-cdrom requires an argument!"
+                exit 1
+            fi
+            ISO_ARGS+="-drive file=${2},media=cdrom"
+            shift
+            shift
+            ;;
+            -nographic)
+            GRAPHICS_CMD="-nographic -display none"
+            shift
+            shift
+            ;;
+            -boot)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-boot requires an argument!"
+                exit 1
+            fi
+            BOOT_ARGS="-boot ${2}"
+            shift
+            shift
+            ;;
+            -smp)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-smp requires an argument!"
+                exit 1
+            fi
+            CPU_COUNT="${2}"
+            shift
+            shift
+            ;;
+            -accel)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-accel requires an argument!"
+                exit 1
+            fi
+            ACCEL_METHOD="${2}"
+            shift
+            shift
+            ;;
+            -m|-mem)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-mem requires an argument!"
+                exit 1
+            fi
+            SYSTEM_MEMORY="${2}"
+            shift
+            shift
+            ;;
+            -vga)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-vga requires an argument!"
+                exit 1
+            fi
+            GRAPHICS_DRIVER="${2}"
+            shift
+            shift
+            ;;
+            -display)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-display requires an argument!"
+                exit 1
+            fi
+            DISPLAY="${2}"
+            GRAPHICS_CMD="-display ${DISPLAY:-cocoa}"
+            shift
+            shift
+            ;;
+            -show-cursor)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-show-cursor requires an argument!"
+                exit 1
+            fi
+            SHOW_CURSOR="${2}"
+            GRAPHICS_CMD="-display ${DISPLAY:-cocoa},show-cursor=${SHOW_CURSOR:-on}"
+            shift
+            shift
+            ;;
+            -drive)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-drive requires an argument!"
+                exit 1
+            fi
+            DISKS+="-drive file=${INSTANCE_PATH}/${INSTANCE_NAME}/${2},format=raw,if=virtio,cache=writeback,discard=unmap"
+            shift
+            shift
+            ;;
+            *)
+            echo "Invalid option"
+            exit 1
+            shift
+            shift
+            ;;
+        esac
+    done
+
+    PIDFILE="${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".pid
+
+    if [ -f "${PIDFILE}" ];
+    then
+        PID=$(cat "${PIDFILE}")
+        ps -p $PID > /dev/null 2>&1
+        if [ $? -eq 0 ]
+        then
+            echo "This instance is already running."
+            exit 1
+        else
+            echo $$ > "${PIDFILE}"
+            if [ $? -ne 0 ]
+            then
+                echo "Could not create PID file"
+                exit 1
+            fi
+        fi        
+    else
+        echo $$ > "${PIDFILE}"
+        if [ $? -ne 0 ]
+        then
+            echo "Could not create PID file"
+            exit 1
+    fi
+    fi
+
+    if [ $ARCH == "x86_64" ]
+    then
+        qemu-system-x86_64 \
+            -name "${INSTANCE_NAME}" \
+            -M q35 \
+            -accel "${ACCEL_METHOD}" \
+            -smp sockets=1,cores="${CPU_COUNT}" \
+            ${ISO_ARGS} \
+            ${DISKS} \
+            -m "${SYSTEM_MEMORY}" \
+            ${GRAPHICS_CMD} \
+            -vga "${GRAPHICS_DRIVER}" \
+            -device ioh3420,id=root.0,slot=1 \
+            -device x3130-upstream,bus=root.0,id=upstream1 \
+            -device xio3130-downstream,bus=upstream1,id=downstream1,chassis=1 \
+            -device ioh3420,id=root.1,slot=2 \
+            -device virtio-balloon-pci,id=balloon0,bus=root.1 \
+            -netdev user,id=net0 \
+            -device virtio-net-pci,netdev=net0 \
+            -device ich9-intel-hda -device hda-output \
+            -device virtio-keyboard-pci \
+            -device virtio-tablet-pci \
+            ${BOOT_ARGS}
+    fi
+
+    if [ $ARCH == "aarch64" ]
+    then
+        qemu-system-aarch64 \
+            -no-user-config \
+            -nodefaults \
+            -accel "${ACCEL_METHOD:-tcg,thread=multi}" \
+            -m "${SYSTEM_MEMORY}" \
+            -cpu cortex-a72 -machine virt \
+            -smp "${CPU_COUNT}" \
+            -bios "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/QEMU_EFI-2.fd \
+            ${ISO_ARGS} \
+            ${DISKS} \
+            -netdev user,id=net0 \
+            -device virtio-net-pci,netdev=net0 \
+            -boot efi \
+            -device virtio-gpu-pci \
+            -device virtio-keyboard-pci \
+            -device virtio-tablet-pci \
+            ${GRAPHICS_CMD}
+    fi
+    ;;
+    create)
+    echo "Create"
+    shift
+    while [[ $# -gt 0 ]]
+    do
+    key="$1"
+        case $key in
+            -disk-size)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-name requires an argument!"
+                exit 1
+            fi
+            BOOTDISK_SIZE="${2}"
+            shift
+            shift
+            ;;
+            -n|-name)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-name requires an argument!"
+                exit 1
+            fi
+            INSTANCE_NAME="${2}"
+            if [ ! -d "${INSTANCE_PATH}"/"${INSTANCE_NAME}" ]; then
+                echo "Directory for ${INSTANCE_NAME} does not exist. Creating."
+                mkdir -pv "${INSTANCE_PATH}"/"${INSTANCE_NAME}"
+            else
+                echo "A directory for this VM seems to exist. Exiting."
+                exit 1
+            fi
+            if [ ! -f "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img ]; then
+                echo "Creating ${BOOTDISK_SIZE} image for ${INSTANCE_NAME}."
+                qemu-img create -f raw "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img "${BOOTDISK_SIZE}"
+                echo "${INSTANCE_NAME}".img > "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/disks.inc
+            fi
+            shift
+            shift
+            ;;
+            -smp)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-smp requires an argument!"
+                exit 1
+            fi
+            CPU_COUNT="${2}"
+            echo "CPU_COUNT=${CPU_COUNT}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+            shift
+            shift
+            ;;
+            -m|-mem)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-mem requires an argument!"
+                exit 1
+            fi
+            SYSTEM_MEMORY="${2}"
+            echo "SYSTEM_MEMORY=${SYSTEM_MEMORY}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+            shift
+            shift
+            ;;
+            -vga)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-vga requires an argument!"
+                exit 1
+            fi
+            GRAPHICS_DRIVER="${2}"
+            echo "GRAPHICS_DRIVER=${GRAPHICS_DRIVER}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+            shift
+            shift
+            ;;
+        esac
+    done
+    ;;
+    clone)
+    echo "Clone"
+    shift
+    while [[ $# -gt 0 ]]
+    do
+    key="$1"
+        case $key in
+            -s|-source)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-source requires an argument!"
+                exit 1
+            fi
+            CLONE_SOURCE="${2}"
+            shift
+            shift
+            ;;
+            -d|-dest)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-dest requires an argument!"
+                exit 1
+            fi
+            CLONE_DEST="${2}"
+            shift
+            shift
+            ;;
+        esac
+    done
+    mkdir -pv "${INSTANCE_PATH}"/"${CLONE_DEST}"
+    qemu-img convert -f raw -O raw "${INSTANCE_PATH}"/"${CLONE_SOURCE}"/"${CLONE_SOURCE}".img "${INSTANCE_PATH}"/"${CLONE_DEST}"/"${CLONE_DEST}".img -p
+    echo "${CLONE_DEST}".img > "${INSTANCE_PATH}"/"${CLONE_DEST}"/disks.inc
+    ;;
+    *)
+    echo "No action specified"
+    exit 1
+esac
