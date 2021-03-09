@@ -245,18 +245,6 @@ case ${1} in
                 exit 1
             fi
             INSTANCE_NAME="${2}"
-            if [ ! -d "${INSTANCE_PATH}"/"${INSTANCE_NAME}" ]; then
-                echo "Directory for ${INSTANCE_NAME} does not exist. Creating."
-                mkdir -pv "${INSTANCE_PATH}"/"${INSTANCE_NAME}"
-            else
-                echo "A directory for this VM seems to exist. Exiting."
-                exit 1
-            fi
-            if [ ! -f "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img ]; then
-                echo "Creating ${BOOTDISK_SIZE} image for ${INSTANCE_NAME}."
-                qemu-img create -f raw "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img "${BOOTDISK_SIZE}"
-                echo "${INSTANCE_NAME}".img > "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/disks.inc
-            fi
             shift
             shift
             ;;
@@ -266,7 +254,6 @@ case ${1} in
                 exit 1
             fi
             CPU_COUNT="${2}"
-            echo "CPU_COUNT=${CPU_COUNT}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
             shift
             shift
             ;;
@@ -276,7 +263,6 @@ case ${1} in
                 exit 1
             fi
             SYSTEM_MEMORY="${2}"
-            echo "SYSTEM_MEMORY=${SYSTEM_MEMORY}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
             shift
             shift
             ;;
@@ -286,12 +272,34 @@ case ${1} in
                 exit 1
             fi
             GRAPHICS_DRIVER="${2}"
-            echo "GRAPHICS_DRIVER=${GRAPHICS_DRIVER}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+            shift
+            shift
+            ;;
+            *)
+            echo "Invalid option"
+            exit 1
             shift
             shift
             ;;
         esac
     done
+    if [ ! -d "${INSTANCE_PATH}"/"${INSTANCE_NAME}" ]; then
+        echo "Directory for ${INSTANCE_NAME} does not exist. Creating."
+        mkdir -pv "${INSTANCE_PATH}"/"${INSTANCE_NAME}"
+    else
+        echo "A directory for this VM seems to exist. Exiting."
+        exit 1
+    fi
+    if [ ! -f "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img ]; then
+        echo "Creating ${BOOTDISK_SIZE} image for ${INSTANCE_NAME}."
+        qemu-img create -f raw "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".img "${BOOTDISK_SIZE}"
+        echo "${INSTANCE_NAME}".img > "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/disks.inc
+    fi
+    if [ ! -f "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf ]; then
+        echo "CPU_COUNT=${CPU_COUNT}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+        echo "SYSTEM_MEMORY=${SYSTEM_MEMORY}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+        echo "GRAPHICS_DRIVER=${GRAPHICS_DRIVER}" >> "${INSTANCE_PATH}"/"${INSTANCE_NAME}"/"${INSTANCE_NAME}".conf
+    fi
     ;;
     clone)
     echo "Clone"
