@@ -12,6 +12,7 @@ SYSTEM_MEMORY="8G"
 GRAPHICS_DRIVER="std"
 ARCH="x86_64"
 BOOTDISK_SIZE="20G"
+NETDEV="-netdev user,id=net0"
 
 case ${1} in
     start)
@@ -141,6 +142,16 @@ case ${1} in
             shift
             shift
             ;;
+            -hostfwd)
+            if [[ "${2}" =~ ^-.* ]]; then
+                echo "-hostfwd requires an argument!"
+                exit 1
+            fi
+            HOSTFWD="${2}"
+            NETDEV="-netdev user,id=net0,hostfwd=${HOSTFWD}"
+            shift
+            shift
+            ;;
             *)
             echo "Invalid option"
             exit 1
@@ -194,7 +205,7 @@ case ${1} in
             -device xio3130-downstream,bus=upstream1,id=downstream1,chassis=1 \
             -device ioh3420,id=root.1,slot=2 \
             -device virtio-balloon-pci,id=balloon0,bus=root.1 \
-            -netdev user,id=net0 \
+            ${NETDEV} \
             -device virtio-net-pci,netdev=net0 \
             -device ich9-intel-hda -device hda-output \
             -device virtio-keyboard-pci \
